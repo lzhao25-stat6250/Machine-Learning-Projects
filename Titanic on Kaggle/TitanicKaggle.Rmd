@@ -1,0 +1,828 @@
+
+---
+title: "Who Would Survive the Titanic Diaster"
+author: "Lanqin  Zhao"
+output:
+  html_document: default
+  html_notebook: default
+  pdf_document: default
+  word_document:
+    toc: yes
+---
+
+### Who Would Survive the Titanic Disaster? 
+This project is from https://www.kaggle.com/c/titanic
+
+"The sinking of the RMS Titanic is one of the most infamous shipwrecks in history.  On April 15, 1912, during her maiden voyage, the Titanic sank after colliding with an iceberg, killing 1502 out of 2224 passengers and crew. This sensational tragedy shocked the international community and led to better safety regulations for ships.
+
+One of the reasons that the shipwreck led to such loss of life was that there were not enough lifeboats for the passengers and crew. Although there was some element of luck involved in surviving the sinking, some groups of people were more likely to survive than others, such as women, children, and the upper-class.
+
+In this challenge, we ask you to complete the analysis of what sorts of people were likely to survive. In particular, we ask you to apply the tools of machine learning to predict which passengers survived the tragedy."
+
+
+
+## Step 1 - Collecting data
+The data is from https://www.kaggle.com/c/titanic/data
+
+The data has been split into two groups:
+training set (train.csv)
+test set (test.csv)
+Traing set includes 891 examples, 12 variables: a label variable, survival indicating whether or not survival, and 11 features.Test set includes 418 examples, 11 features.
+The 12 variables are discribed as following:
+
+Variable	Definition	Key
+survival	Survival	0 = No, 1 = Yes
+pclass	Ticket class	1 = 1st, 2 = 2nd, 3 = 3rd
+sex	Sex	
+Age	Age in years	
+sibsp	# of siblings / spouses aboard the Titanic	
+parch	# of parents / children aboard the Titanic	
+ticket	Ticket number	
+fare	Passenger fare	
+cabin	Cabin number	
+embarked	Port of Embarkation	C = Cherbourg, Q = Queenstown, S = Southampton
+Variable Notes
+
+pclass: A proxy for socio-economic status (SES)
+1st = Upper
+2nd = Middle
+3rd = Lower
+
+age: Age is fractional if less than 1. If the age is estimated, is it in the form of xx.5
+
+sibsp: The dataset defines family relations in this way...
+Sibling = brother, sister, stepbrother, stepsister
+Spouse = husband, wife (mistresses and fiancés were ignored)
+
+parch: The dataset defines family relations in this way...
+Parent = mother, father
+Child = daughter, son, stepdaughter, stepson
+Some children travelled only with a nanny, therefore parch=0 for them.
+
+
+## Step 2: Exploring and preparing the data
+Explore the data to understand data, to clean data, to create new festures, to obtain insights, to find  predictive features, and prepare the data for modeling.
+
+# Import data
+Import the data into R
+
+```{r}
+# load R packages
+library(plyr)  # data manipulation
+library(dplyr)  # data manipulation
+library(ggplot2) # data visiualization
+library(scales) # data visiualization
+library(gmodels) # crosstable
+library(stringr) # String manipulation
+library(caret) # tune parameters
+library(rpart) # Decision tree utils
+library(randomForest) # Random Forest
+library(kernlab) # SVM
+library(party) # Conditional inference trees
+library(gbm) # gbm
+library(MASS) # glm
+library(fastAdaboost) # AdaBoost
+library(xgboost) #xgboost
+
+#Import the CSV file.
+train <- read.csv("train.csv", header = TRUE, stringsAsFactors =FALSE)
+test <- read.csv("test.csv", header = TRUE,stringsAsFactors =FALSE)
+str(train)
+str(test)
+
+```
+# Combine data sets and convert data type
+```{r}
+# Add a "Survived" variable to the test set to allow for combining data sets
+test$Survived <- NA
+
+# Combine data sets
+data <- rbind(train, test)
+# Convert data type to factor  
+data$Survived <- as.factor(data$Survived)
+data$Pclass <- as.factor(data$Pclass)
+data$Sex <- as.factor(data$Sex)   
+data$Embarked <- as.factor(data$Embarked)
+
+```
+# Data understanding
+Age has a lot of missing values. Fare and Embarked have a few missing values.There seem no outliers for all features.
+
+```{r}
+summary(data)
+```
+# Data exploration, data cleaning, data manipulation, and feature engineering 
+
+Survived: 
+the survival rate was 38.4%.
+```{r}
+# Survival rate
+data[1:891,] %>% 
+  group_by(Survived) %>%
+  summarise(count=n()) %>%
+  mutate(pct=count/sum(count))  %>%
+  ggplot(aes(x=Survived, y=pct, fill=Survived)) +
+  geom_bar(stat="identity") +
+  scale_y_continuous(labels=percent) + 
+  geom_text(aes(label=paste0(round(pct*100,0),"%"), y=pct+0.02), size=4, colour= "black")+ 
+  theme(legend.position = "NULL")
+```
+Pcalss: 
+There are much more passengers in first class. 24% of passengers were in first class, 21% in second class, 55% in third class.
+Rich people survived at a higer rate. The survival rate is 63%, 47%, and 24% for first, second, and third class respectively.
+```{r}
+# Pclass
+data[1:891,] %>% 
+  group_by(Pclass) %>%
+  summarise(count=n()) %>%
+  mutate(pct=count/sum(count))  %>%
+  ggplot(aes(x=Pclass, y=pct, fill=Pclass)) +
+  geom_bar(stat="identity") +
+  scale_y_continuous(labels=percent) + 
+  geom_text(aes(label=paste0(round(pct*100,0),"%"), y=pct+0.02), size=4, colour= "black")+
+  theme(legend.position = "none")
+
+#Pclass VS Survival Rate
+data[1:891,] %>% group_by(Pclass, Survived) %>%
+  summarise(count=n()) %>%
+  mutate(pct=count/sum(count))  %>%
+ggplot(aes(x=Survived, y=pct, fill=Survived)) +
+  geom_bar(stat="identity") +
+  facet_grid(. ~ Pclass) +
+  scale_y_continuous(labels=percent) + 
+  geom_text(aes(label=paste0(round(pct*100,0),"%"), y=pct+0.02), size=4, colour= "black")+
+  theme(legend.position = "none")
+
+```
+
+Name:
+contains formal titles, which can be extracted as a potentially  useful feature.
+Ttile, new variable derived by Name. 
+Baesd on the plots, 60% off passengers were Mr; "Women and children first" is true in Tatanic diaster. Women and children had more than 3 times that men had to survive;It's obvious that Title and Pclass play important roles in predicting who would survive. Passengers  having title of Master, Miss, and Mrs had more than 90% chance to  survive in first and second class, but those in third class had less han 50% chance. Mr even had less than 40% chance to survive in first class and about 10% in second and third class.
+
+```{r}
+#Name: new variable Title derived by Name is predictive
+# Look at the first few names
+data$Name[1:20]
+#extract title
+data$Title = sapply(data$Name, FUN=function(x) { strsplit(x, split="[,.]")[[1]][2]})
+data$Title = sub(' ', '', data$Title)
+table(data$Title)
+# combine special, rare titles
+data$Title[data$Title %in% c('Capt', 'Col', 'Don', 'Major', 'Sir', 'Dr', 'Rev')] <- 'Mr'
+data$Title[data$Title %in% c('Mme', 'Mlle', 'Ms','Dona', 'Lady', 'the Countess', 'Jonkheer')] <- 'Miss'
+table(data$Title)
+# convert to factor
+data$Title = factor(data$Title)
+
+# explore Title
+# Title=Master,boys with age of 0.33-14.5,median= 4.0
+table(data$Sex[data$Title=="Master"]) # they are male
+summary(data$Age[data$Title=="Master"])# 0.33-14.5, median= 4.0
+# Title=Miss, age of 0.17-63.0
+summary(data$Age[data$Title=="Miss"])# 0.17-63.0, median= 22.00, mean=22.16
+
+# Title
+data[1:891,] %>% group_by(Title) %>%
+  summarise(count=n()) %>%
+  mutate(pct=count/sum(count))  %>%
+ggplot(aes(x=Title, y=pct, fill=Title)) +
+  geom_bar(stat="identity") +
+  scale_y_continuous(labels=percent) + 
+  geom_text(aes(label=paste0(round(pct*100,0),"%"), y=pct+0.02), size=4, colour= "black")+
+  theme(legend.position = "none")
+
+# Title vs Survival
+data[1:891,] %>% group_by(Title, Survived) %>%
+  summarise(count=n()) %>%
+  mutate(pct=count/sum(count))  %>%
+ggplot(aes(x=Survived, y=pct, fill=Survived)) +
+  geom_bar(stat="identity") +
+  facet_grid(. ~ Title) +
+  scale_y_continuous(labels=percent) + 
+  geom_text(aes(label=paste0(round(pct*100,0),"%"), y=pct+0.03), size=4, colour= "black")+
+  theme(legend.position = "none")
+
+# Title Vs vs survial under class
+data[1:891,] %>% group_by(Pclass, Title, Survived) %>%
+  summarise(count=n()) %>%
+  mutate(pct=count/sum(count))  %>%
+ggplot(aes(x=Survived, y=pct, fill=Survived)) +
+  geom_bar(stat="identity") +
+  facet_grid(Pclass ~ Title) +
+  scale_y_continuous(labels=percent) + 
+  geom_text(aes(label=paste0(round(pct*100,0),"%"), y=pct+0.02), size=2, colour= "black")+
+  theme(legend.position = "none")
+
+```
+Sex: 
+It is clearly obvious that female have much more chance, 74%,  to survive than male, 19%. 
+```{r}
+#Sex
+data[1:891,] %>% group_by(Sex, Survived) %>%
+  summarise(count=n()) %>%
+  mutate(pct=count/sum(count))  %>%
+ggplot(aes(x=Survived, y=pct, fill=Survived)) +
+  geom_bar(stat="identity") +
+  facet_grid(. ~ Sex) +
+  scale_y_continuous(labels=percent) + 
+  geom_text(aes(label=paste0(round(pct*100,0),"%"), y=pct+0.03), size=4, colour= "black")+
+  theme(legend.position = "none")
+```
+Age
+Based on the plot of Title above, Mr in first class and Master, Miss, and Mrs in third class are difficult to predict if they would survive, so I focus on these passengers. From the plot, Age is associated with survival rate. Then it is preferable to keep the age feature and to impute the missing values.
+
+```{r}
+#Age vs Survival under Sex
+ggplot( subset(data[1:891,],!is.na(Age) & Pclass=="1" & Sex=="male") , aes(x = Age, fill=Survived)) + 
+  geom_histogram( binwidth=2)  + 
+  facet_wrap(~ Sex) +
+  labs( x = "Age", y = "Count")
+
+ggplot( subset(data[1:891,],!is.na(Age) & Pclass=="3") , aes(x = Age, fill=Survived)) + 
+  geom_histogram( binwidth=5)  + 
+  facet_wrap(~ Sex) +
+  labs( x = "Age", y = "Count")
+
+```
+how to impute missing values?
+method: Age1, impute Age by Title
+```{r}
+#method1: Age1, impute Age by Title
+#create Age1
+data$Age1=data$Age
+#Title=Master
+summary(data$Age[data$Title=="Master"])# 0.33-14.5, boys with median= 4.0
+masterAge <- data$Title == "Master" & is.na(data$Age)
+data[masterAge, "Age1"] <- 4.0
+
+# Title=Miss
+summary(data$Age[data$Title=="Miss"]) # 0.17-63.0, median= 22.00, mean=22.16
+missAlone <- data$Title == "Miss" & data$Parch==0 & data$SibSp==0 
+summary(data[missAlone, "Age"]) # mean=27
+missAloneAge <- missAlone & is.na(data$Age)
+data[missAloneAge, "Age1"] <- 27
+
+missNot <- data$Title == "Miss" & (data$Parch + data$SibSp >0 )
+summary(data[missNot, "Age"]) # mean=15
+missNotAge <- missNot & is.na(data$Age)
+data[missNotAge, "Age1"] <- 15
+
+#Title=Mrs
+summary(data$Age[data$Title =="Mrs"]) # mean=37
+mrsAge <- data$Title == "Mrs" & is.na(data$Age)
+data[mrsAge, "Age1"] <- 37
+
+#Title=Mr
+summary(data$Age[data$Title =="Mr"]) # mean=33
+mrAge <- data$Title == "Mr" & is.na(data$Age)
+data[mrAge, "Age1"] <- 33
+
+summary(data$Age1)
+
+```
+AgeGroup
+Based on the above Age plot, different Age group passengers had different chance to survive, so I group Age1. From the plot, the group of less than 7 years had the highest chance to survive, but the group of 28-35 had the least chance.Under pclass and Title, AgeGroup seems predictive.
+```{r}
+# group Age1 to AgeGroup
+AgeGroup= cut(data$Age1, breaks = c(0,7,14.5 ,21,28,35,50,80), labels = c("0-7", "7-14.5","14.5-21","21-28","28-35","35-50","50-"))
+table(AgeGroup)
+data$AgeGroup=AgeGroup
+
+#AgeGroup Vs Survival
+ggplot(data[1:891,], aes(x = AgeGroup, fill=Survived)) +
+  geom_bar() +
+  xlab("AgeGroup") +
+  ylab("Total Count") +
+  labs(fill = "Survived")
+
+# AgeGroup Vs Title, under Pclass, Survival
+ggplot(data[1:891,], aes(x = AgeGroup, fill=Survived)) +
+  geom_bar() +
+  facet_wrap(Pclass~Sex)+
+  xlab("AgeGroup") +
+  ylab("Total Count") +
+  labs(fill = "Survived")
+
+```
+
+Sibsp:
+It seems that passengers having more than 2 siblings/spouses had  very little chance to survive. Then I group it to SibGroup. 
+
+```{r}
+
+#Sibsp
+summary(data$SibSp)
+ggplot(data[1:891,], aes(x = as.factor(SibSp), fill = Survived)) +
+  geom_bar() +
+  xlab("Sibsp") +
+  ylab("Total Count") +
+  labs(fill = "Survived") 
+# SibGroup
+data$SibGroup <- cut(data$SibSp, breaks=c(-1,0,2,8),levels=c("0","1-2","3-"))
+# SibGroup vs Survival under pclass and title
+ggplot(data[1:891,], aes(x = SibGroup, fill = Survived)) +
+  geom_bar() +
+    xlab("Sibsp") +
+  ylab("Total Count") +
+  labs(fill = "Survived") 
+
+```
+
+Parch:
+Similar with SibSp, passengers having 0 or more than 3 parents/children have less chance to survive.  Then I group it to ParGroup.Under Pclass and Title, ParGroup is litte predictive for third class.
+
+```{r}
+#Parch
+summary(data$Parch)
+ggplot(data[1:891,], aes(x = as.factor(Parch), fill = Survived)) +
+  geom_bar() +
+  xlab("Parch") +
+  ylab("Total Count") +
+  labs(fill = "Survived") 
+
+# ParGroup
+data$ParGroup <- cut(data$Parch, breaks=c(-1,0,3,9), levels=c("0","1-3","4-"))
+# ParGroup vs Survival under pclass and title
+ggplot(data[1:891,], aes(x = ParGroup, fill = Survived)) +
+  geom_bar() +
+  xlab("ParGroup") +
+  ylab("Total Count") +
+  labs(fill = "Survived") 
+```
+FamilySize
+FamilySize=SibSp+Parch+1. 
+From the plots, about 60% of passengers were traveling alone, and passengers traveling alone and having a big family size had less chance to survive. 
+```{r}
+# Create FamilySize
+data$FamilySize <- with(data,SibSp+Parch+1 )
+# FamilySize and survived are associated? Yes
+ggplot(data[1:891,], aes(x = as.factor(FamilySize), fill = Survived)) +
+  geom_bar() +
+  xlab("FamilySize") +
+  ylab("Total Count") +
+  labs(fill = "Survived") 
+
+# recode FamilySize since there are few examples for FamilySize>4
+data$FamilySize[data$FamilySize>4] <- 5
+
+# FamilySize vs survival 
+ggplot(data[1:891,], aes(x = as.factor(FamilySize), fill = Survived)) +
+  geom_bar() +
+  xlab("FamilySize") +
+  ylab("Total Count") +
+  labs(fill = "Survived")
+
+```
+Role *
+Parents,  who needed to take care of their children have more chance to survive? Especially, when there were more than 1 kid, fathers were needed to help have more chance to survive? Refine Title varibale to look at. The result is surprising, parents have more chance to die.However, the differences between father and Mr, mother and Mrs are not much, so I will keep Title in modeling.
+
+```{r}
+# derive Role variable
+Role <- as.character(data$Title)
+#Father role
+#Familysize>=4,
+# father, 2 more kids
+Father2 <- data$Title=="Mr" & data$SibSp==1 & data$FamilySize>3
+Role[Father2 & (data$Age>20 | is.na(data$Age))]="father2"
+# FamilySize==3, 
+# Father, one kid
+Father1 <- data$Title=="Mr" & data$SibSp==1 & data$FamilySize==3
+Role[Father1 & (data$Age>20 | is.na(data$Age))]="father1" # exclude cases of mother with two kids
+#father, 2kids
+Father2 <- data$Title=="Mr" & data$SibSp==0 & data$FamilySize==3
+Role[Father2 & (data$Age>20 | is.na(data$Age))]="father2"
+# FamilySize==2
+#father, 1 kid
+Father1 <- data$Title=="Mr" & data$SibSp==0 & data$FamilySize==2
+Role[Father1 & (data$Age>25 | is.na(data$Age))]="father1" # exclude adult son
+
+# Mother role
+Mother <- data$Title=="Mrs" & data$Parch>0 
+Role[Mother]="mother"
+
+# Role
+table(Role)
+data$Role <- Role
+
+# combine father1 and father2 into father since there are only a few examples.
+data$Role[data$Role=="father1" | data$Role=="father2" ]<- "father"
+
+# convert to factor
+data$Role<- as.factor(data$Role)
+
+# Role Vs Survival
+ggplot(data[1:891,], aes(x = Role, fill = Survived)) +
+  geom_bar(position = 'fill') +
+  xlab("Role") +
+  ylab("Total Count") +
+  labs(fill = "Survived") 
+
+# convert type
+data$FamilySize <- as.factor(data$FamilySize)
+
+```
+
+Ticket
+PartySize, the number of a group of people bought a joint ticket, so the fare for each person should be recalculated. 
+PartySize, is like FamilySize,  equals 1 or above 4 have high chance to die. Since the observations are limited when PartySize>4, I will combine them into 5 after I calculate the Fare for each passenger.
+```{r}
+# derive PartySize, the number of passengers sharing a ticket
+arrange(filter(data,FamilySize=="5"),Ticket) # a group  share a ticket
+
+ticket.party <- data %>%
+             group_by(Ticket) %>%
+             summarise(PartySize=n()) 
+# merge PartySize to data
+data <- left_join(data,ticket.party,by="Ticket")
+
+# look at PartySize
+table(data$PartySize)
+
+# Partysize vs survival 
+ggplot(data[1:891,], aes(x = PartySize, fill = Survived)) +
+  geom_bar() +
+  xlab("PartySize") +
+  ylab("Total Count") +
+  labs(fill = "Survived")
+
+```
+Fare 
+FareEach,Fare for each passenger.
+FareGroup, group FareEach, the more a passenger paid, the more chance of survival they had. 
+```{r}
+# recalculate fare for each passenger
+data$FareEach <- with(data, Fare/PartySize)
+# impute missing values
+#Intuitively, FareEach should be associated with Pclass, the boxplot proves this.
+# disributions of FareEach for Pclass
+ggplot(data[1:891,], aes(x = Pclass, y = FareEach, fill = Pclass)) +
+  geom_boxplot() +
+  xlab("Pclass") +
+  ylab("FareEach") 
+
+summary(data$Fare)
+filter(data, is.na(Fare))
+summary(data[which(data$Pclass==3),"FareEach"]) # mean=7.329
+data$FareEach[which(is.na(data$Fare))] <- 7.329
+
+# Fare is associated with Suvival? 
+summary(data$FareEach)
+ggplot(data[1:891,], aes(x = FareEach, fill = Survived)) +
+  geom_histogram(binwidth = 8) +
+  xlab("FareEach") +
+  ylab("Total Count") +
+  labs(fill = "Survived") 
+# group FareEach by quantile
+summary(data$FareEach)
+data$FareGroup <- cut(data$FareEach, breaks=c(-1,0,7.85,8.05,15.00,129))
+# FareGroup vs Survival
+ggplot(data[1:891,], aes(x = FareGroup, fill = Survived)) +
+geom_bar()+
+xlab("FareGroup") +
+ylab("Total Count") +
+labs(fill = "Survived") 
+
+# recode PartySize since there are few examples for PartySize>4
+data$PartySize[data$PartySize>5] <- 5
+data$PartySize <- as.factor(data$PartySize)
+
+```
+Cabin
+CabinFirst, the first letter of Cabin, may represent different position of the ship, so it may associated with survival rate. The plot proves it. Passengers whose Cabins' first letters are B,C,D,E,F had more chance to survive. However, most passengers didn't have a cabin, and these had much less chance to survive than those having a cabin. I will create a feature, HaveCabin, indicate if a passenger had a cabin, and use it in modeling.
+
+```{r}
+# Replace empty cabins with a "U"
+length(unique(data$Cabin))
+data$Cabin[data$Cabin == ""] <- "U"
+
+# Take a look at just the first letter as a factor
+data$CabinFirst <- as.factor(substr(data$Cabin, 1, 1))
+
+# Plot
+# Cabin is associated with survival rate? Yes
+ggplot(data[1:891,], aes(x = CabinFirst, fill = Survived)) +
+  geom_bar() +
+  ggtitle("Survivability by Pclass,CabinFirst") +
+  xlab("cabinFirst") +
+  ylab("Total Count") +
+  labs(fill = "Survived")
+data$HaveCabin <- as.factor(ifelse(data$Cabin=="U","0","1"))
+
+```
+Side:
+Since the ship was hitted on the left side, maybe side is a good predictor. Maybe Cabin's last number, like house/room number, can have the information. The plot shows passengers having cabins on the left side of the ship had slightly less chance to survive than those on the right side. 
+```{r}
+
+CabinLast <- str_sub(data$Cabin, -1, -1)
+table(CabinLast)
+Side <- rep("unknown",length(CabinLast))
+Side[CabinLast %in% c("0","2","4","6", "8")] <- "left"
+Side[CabinLast %in% c("1","3","5","7", "9")] <- "right"
+# convert into factor
+table(Side)
+data$Side <- factor(Side)
+# Side Vs Survival
+ggplot(data[1:891,], aes(x = Side, fill = Survived)) +
+  geom_bar() +
+  xlab("Side") +
+  ylab("Total Count") +
+  labs(fill = "Survived") 
+
+
+
+```
+
+Embarked:
+It seems that passenger coming from Cherbourg (C) had more chance to survive. 
+Maybe the proportion of first class passengers was higher for those from Cherbourg than those from Queenstown (Q), Southampton (S).The plot proves it. 
+The passengers from Queenstown (Q) are almost third class, but the survival rate is much higher than that of the third class. From the table, there are more children and women, 53%, in those from Queenstown (Q).
+
+```{r}
+# understand Embarked
+table(data$Embarked)
+# replace missing values with mode
+data[which(data$Embarked==""),"Embarked"]<-"S" 
+# drop missing values level
+data$Embarked<-factor(data$Embarked, levels=c("C","Q","S"))
+# the survival rate is associated with where the passengers are from?
+ggplot(data[1:891,], aes(x = Embarked, fill = Survived)) +
+  geom_bar() +
+  xlab("Embarked") +
+  ylab("Total Count") +
+  labs(fill = "Survived")
+# the proportion of first class passengers is higher for those from Cherbourg? Yes
+ggplot(data[1:891,], aes(x = Embarked, fill = Pclass)) +
+  geom_bar() +
+  xlab("Embarked") +
+  ylab("Total Count") +
+  labs(fill = "Pclass")
+# there are more children and women in those from Queenstown (Q)? Yes
+ggplot(data[1:891,], aes(x = Embarked, fill = Title)) +
+  geom_bar() +
+  xlab("Embarked") +
+  ylab("Total Count") +
+  labs(fill = "Title")
+prop.table(table(data$Embarked, data$Title),1)
+
+```
+
+# Data preparation - creating training and test datasets
+Create training dataset to build models and test dataset to make predictions.
+
+```{r}
+# split the data frames to training and test datasets
+train.df <- data[1:891, c( "Survived", "Pclass", "Sex", "Embarked", "Title", "AgeGroup", "SibGroup", "ParGroup", "FamilySize", "PartySize", "FareGroup", "HaveCabin")]
+train.df$Survived <- factor(train.df$Survived, levels = c("0","1"))
+
+test.df <- data[892:1309, c( "Pclass", "Sex", "Embarked", "Title", "AgeGroup", "SibGroup", "ParGroup", "FamilySize", "PartySize", "FareGroup", "HaveCabin")]
+
+```
+# check type of features
+```{r}
+str(train.df)
+```
+
+## Step 3: Training and evaluating models on the training dataset
+Since the training dataset is small, I will use cross validation to tune parameters for every algorithm and evaluate models. 
+Based on the values of Cross validaion accuracy of the models, the gbm model, whose CV accuracy is 0.8417, is the best. Therefore, I will use the gbm model as the final model to make predictions on the test dataset.
+
+# store fitted accuracy and cross validation accuracy.
+```{r}
+train.acc <- numeric(5) 
+cv.acc <- numeric(5)
+```
+
+# build a gbm model
+
+```{r}
+# tune parameters
+ctrl <- trainControl(method = "cv",
+                     number = 10 )
+grid_gbm <-  expand.grid(interaction.depth = c(5, 7, 9), 
+                        n.trees = (1:4)*50, 
+                        shrinkage = 0.01,
+                        n.minobsinnode = c(12, 14, 16, 18))
+                        
+set.seed(1234)
+m_gbm1 <- train(Survived ~ ., data = train.df, 
+                 method = "gbm", 
+                 trControl = ctrl, 
+                 verbose = FALSE, 
+                 tuneGrid = grid_gbm,
+                 metric = "Accuracy")
+m_gbm1$bestTune
+
+# Evaluate model performance by cross validation
+set.seed(1234)
+m_gbm <- train(Survived ~ ., data = train.df, 
+                 method = "gbm", 
+                 trControl = ctrl, 
+                 verbose = FALSE, 
+                 tuneGrid = m_gbm1$bestTune,
+                 metric = "Accuracy")
+
+#accuracy
+train.acc[1] <- mean(predict(m_gbm,train.df)== train.df$Survived) 
+train.acc[1] 
+cv.acc[1] <- m_gbm$results$Accuracy
+cv.acc[1] 
+
+# look at feature importance
+imp.gbm <- varImp(m_gbm, scale = FALSE)
+imp.gbm
+
+```
+
+# build a random forest model
+```{r}
+# tune parameters
+grid_rf <- expand.grid( .mtry = c(2, 3, 4, 5))
+set.seed(1234)
+m_rf1 <- train(Survived ~ .,  data=train.df,
+              method = "rf",
+              metric = "Accuracy", 
+              trControl = ctrl,
+              tuneGrid = grid_rf)
+m_rf1$bestTune
+
+# Evaluate model performance by cross validation
+set.seed(1234)
+m_rf <- train(Survived ~ ., data = train.df, 
+                 method = "rf", 
+                 metric = "Accuracy",
+                 trControl = ctrl, 
+                 tuneGrid = m_rf1$bestTune
+                 )
+
+#accuracy
+train.acc[2] <- mean(predict(m_rf,train.df)== train.df$Survived) 
+train.acc[2] 
+cv.acc[2] <- m_rf$results$Accuracy
+cv.acc[2] 
+
+# look at feature importance
+imp.rf <- varImp(m_rf, scale = FALSE)
+imp.rf
+
+```
+
+# build a xgboost model
+
+```{r}
+# tune parameters
+grid_xg <- expand.grid( nrounds= (1:4)*50, 
+                        max_depth= c(7, 9, 11), 
+                        eta= 0.3, 
+                        gamma=0, 
+                        min_child_weight=c(6,8,10),
+                        colsample_bytree= c(0.6, 0.8, 1), 
+                        subsample=1)
+set.seed(1234)
+m_xg1 <- train(Survived ~ .,  data=train.df, 
+               method = "xgbTree",
+               metric = "Accuracy",
+               trControl = ctrl,
+               tuneGrid = grid_xg)
+m_xg1$bestTune
+
+# Evaluate model performance by cross validation
+set.seed(1234)
+m_xg <- train(Survived ~ ., data = train.df, 
+                 method = "xgbTree", 
+                 metric = "Accuracy",
+                 trControl = ctrl, 
+                 tuneGrid = m_xg1$bestTune
+                 )
+
+#accuracy
+train.acc[3] <- mean(predict(m_xg,train.df)== train.df$Survived) 
+train.acc[3] 
+cv.acc[3] <- m_xg$results$Accuracy
+cv.acc[3] 
+
+# look at feature importance
+imp.xg <- varImp(m_xg, scale = FALSE)
+imp.xg
+
+```
+
+# build a logistic regression model
+The fit accuracy is 0.8507, Cv accuracy is 0.8385.
+```{r}
+# select features
+# fit a logistic regression model with all features
+model.glm1=glm(Survived ~ ., data=train.df,
+              family= "binomial" )
+# significnat test
+anova(model.glm1, test="Chisq")
+# drop insignificant features and  fit a  model 
+model.glm2=glm(Survived ~ Pclass + Sex + Embarked + Title + AgeGroup + SibGroup + ParGroup + HaveCabin,
+               data=train.df,
+               family = "binomial" )
+  
+# goodness of fit test
+library(ResourceSelection)
+hl <- hoslem.test(model.glm2$y, fitted(model.glm2), g=10)
+hl # p-value=0.08, poor fit
+
+# add interation effects and use sepwise to select features
+step.glm <- step(model.glm2, 
+                 scope = list(upper = as.formula(Survived ~ .^2),
+                              lower = as.formula(Survived ~ .)), 
+                 direction = "both")
+
+# train a model with the features stepwise selected
+model.glm <- glm(Survived ~ Pclass + Sex + Embarked + Title + AgeGroup + SibGroup + 
+    ParGroup + HaveCabin + Pclass:Sex + Sex:SibGroup + Sex:Embarked + Embarked:ParGroup, 
+                 data=train.df,
+                 family ="binomial")
+summary(model.glm)
+
+# goodness of fit test
+hl <- hoslem.test(model.glm$y, fitted(model.glm), g=10)
+hl # p-value=0.94, good fit
+
+# evaluate model by cross validation
+m_glm <- train(Survived ~ Pclass + Sex + Embarked + Title + AgeGroup + SibGroup + 
+    ParGroup + HaveCabin + Pclass:Sex + Sex:SibGroup + Sex:Embarked + Embarked:ParGroup,  data=train.df, 
+               method = "glm",
+               family = "binomial",
+               metric = "Accuracy",
+               trControl = ctrl,
+               tuneLength = 5)
+m_glm
+
+# look at feature importance
+imp.glm <- varImp(m_glm, scale = FALSE)
+imp.glm
+
+# accuracy
+train.acc[4] <- mean(predict(m_glm,train.df)==train.df$Survived)
+train.acc[4] 
+cv.acc[4] <-  m_glm$results$Accuracy
+cv.acc[4]
+
+```
+
+# build a svm model
+
+```{r}
+# tune parameters
+grid_svm <- expand.grid(sigma = c(.01, .015, 0.2),
+                        C= c(0.7, 0.8, 0.9, 1, 1.1))
+set.seed(1234)
+m_svm1 <- train(Survived ~ .,  data=train.df, 
+               method = "svmRadial",
+               metric = "Accuracy",
+               trControl = ctrl,
+               tuneGrid = grid_svm)
+m_svm1$bestTune 
+
+# Evaluate model performance by cross validation
+set.seed(1234)
+m_svm <- train(Survived ~ .,  data=train.df, 
+               method = "svmRadial",
+               metric = "Accuracy",
+               trControl = ctrl,
+               tuneGrid = m_svm1$bestTune)
+
+# look at feature importance
+imp.svm <- varImp(m_svm, scale = FALSE)
+imp.svm
+
+# accuracy
+train.acc[5] <- mean(predict(m_svm,train.df)==train.df$Survived)
+train.acc[5] 
+cv.acc[5] <-  m_svm$results$Accuracy
+cv.acc[5]
+
+```
+
+# Summarize the performance of the 5  models
+```{r}
+model.name<- c("gbm", "randomForest", "xgboost","GLM","SVM")
+result <- data.frame(model.name, train.acc, cv.acc)
+result
+```
+
+
+## Step 4: Making prediction
+The accuracy on test dataset is 0.80861, which gets me in the top 10% teams in the Tatanic competition using only one model.
+
+# Use the gbm model to make predictions
+```{r}
+# use the gbm model to make predictions 
+prediction.gbm <- predict(m_gbm, test.df)
+table(prediction.gbm)
+# Write out a CSV file for submission to Kaggle
+submit.gbm <- data.frame(PassengerId = 892:1309, Survived = prediction.gbm)
+write.csv(submit.gbm, file = "titanic_zlqgbm.csv", row.names = FALSE) #0.80861
+
+```
+
+
+
+
+
+
